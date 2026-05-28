@@ -1,171 +1,350 @@
 package ch.lightsbb.ui
 
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lightsbb.api.Station
 import ch.lightsbb.viewmodel.SearchViewModel
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 
-/**
- * Root composable for the search screen — the app's entry point.
- *
- * Displays two [StationField]s (From / To) with live autocomplete dropdowns, a search
- * button, and an optional error message. Both fields are pre-populated from the last
- * successful search via [SearchViewModel], so the user's most common route is ready on launch.
- *
- * ## Design constraints (Light Phone III)
- * - Pure black background (`0xFF000000`) with white text — no colour accents whatsoever.
- * - Generous vertical padding (32 dp top, 48 dp below title) to give the sparse layout
- *   room to breathe on the device's tall narrow display.
- * - The search button is 56 dp tall — the Material3 recommended minimum touch target.
- * - While a search is loading, the button is replaced by a [CircularProgressIndicator] so
- *   the user cannot trigger a second concurrent request.
- *
- * @param viewModel Shared ViewModel providing UI state and event callbacks.
- * @param onNavigateToResults Called after [SearchViewModel.searchConnections] succeeds.
- *   In [ch.lightsbb.MainActivity] this triggers `navController.navigate("results")`.
- */
+private val Gray = Color(0xFF888888)
+private val DimGray = Color(0xFF444444)
+private val SubtleGray = Color(0xFF222222)
+private val SurfaceGray = Color(0xFF0D0D0D)
+
 @Composable
 fun SearchScreen(viewModel: SearchViewModel, onNavigateToResults: () -> Unit) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+
+    var date by remember { mutableStateOf(LocalDate.now()) }
+    var time by remember { mutableStateOf(LocalTime.now().withSecond(0).withNano(0)) }
+    var isDeparture by remember { mutableStateOf(true) }
+
+    val dateLabel = date.format(DateTimeFormatter.ofPattern("d MMM yyyy")).uppercase()
+    val timeLabel = time.format(DateTimeFormatter.ofPattern("HH:mm"))
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .padding(horizontal = 24.dp, vertical = 32.dp)
+            .padding(horizontal = 28.dp)
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
+            Spacer(modifier = Modifier.height(44.dp))
 
-            // App title — doubles as a visual anchor at the top of the otherwise minimal screen.
+            // Title — underlined like the Light Phone GPS Mode header
             Text(
-                text = "SBB Light",
+                text = "SBB LIGHT",
                 color = Color.White,
-                fontSize = 28.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 48.dp)
+                fontSize = 12.sp,
+                fontFamily = SpaceGrotesk,
+                fontWeight = FontWeight.Medium,
+                letterSpacing = 4.sp,
+                modifier = Modifier.drawBottomLine(Color.White, 6.dp)
             )
 
+            Spacer(modifier = Modifier.height(52.dp))
+
+            // From field with swap button
             StationField(
-                label = "FROM",
+                label = "From:",
                 query = uiState.fromQuery,
                 suggestions = uiState.fromSuggestions,
                 onQueryChange = viewModel::onFromQueryChange,
                 onStationSelected = viewModel::onFromStationSelected,
-                // ImeAction.Next moves focus to the "To" field without submitting the form.
-                imeAction = ImeAction.Next
-            )
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            StationField(
-                label = "TO",
-                query = uiState.toQuery,
-                suggestions = uiState.toSuggestions,
-                onQueryChange = viewModel::onToQueryChange,
-                onStationSelected = viewModel::onToStationSelected,
-                // ImeAction.Search on the second field lets the user trigger a search
-                // directly from the keyboard without reaching for the button.
-                imeAction = ImeAction.Search,
-                onSearch = { viewModel.searchConnections(onNavigateToResults) }
+                imeAction = ImeAction.Next,
+                trailing = {
+                    val from = uiState.fromQuery
+                    val to = uiState.toQuery
+                    Text(
+                        text = "⇅",
+                        color = Color.White,
+                        fontSize = 22.sp,
+                        fontFamily = SpaceGrotesk,
+                        modifier = Modifier
+                            .padding(start = 12.dp)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) {
+                                viewModel.onFromQueryChange(to)
+                                viewModel.onToQueryChange(from)
+                            }
+                    )
+                }
             )
 
             Spacer(modifier = Modifier.height(36.dp))
 
+            // To field
+            StationField(
+                label = "To:",
+                query = uiState.toQuery,
+                suggestions = uiState.toSuggestions,
+                onQueryChange = viewModel::onToQueryChange,
+                onStationSelected = viewModel::onToStationSelected,
+                imeAction = ImeAction.Search,
+                onSearch = { viewModel.searchConnections(onNavigateToResults) }
+            )
+
+            Spacer(modifier = Modifier.height(48.dp))
+
+            // Thin section divider
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(0.5.dp)
+                    .background(DimGray)
+            )
+
+            Spacer(modifier = Modifier.height(36.dp))
+
+            // Date row
+            InfoRow(
+                label = "Date",
+                value = dateLabel,
+                onClick = {
+                    DatePickerDialog(
+                        context,
+                        { _, year, month, day ->
+                            date = LocalDate.of(year, month + 1, day)
+                        },
+                        date.year,
+                        date.monthValue - 1,
+                        date.dayOfMonth
+                    ).show()
+                }
+            )
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // Time row
+            InfoRow(
+                label = "Time",
+                value = timeLabel,
+                onClick = {
+                    TimePickerDialog(
+                        context,
+                        { _, hour, minute ->
+                            time = LocalTime.of(hour, minute)
+                        },
+                        time.hour,
+                        time.minute,
+                        true
+                    ).show()
+                }
+            )
+
+            Spacer(modifier = Modifier.height(48.dp))
+
+            // Departure / Arrival slider toggle
+            DepartureArrivalToggle(
+                isDeparture = isDeparture,
+                onToggle = { isDeparture = it }
+            )
+        }
+
+        // Error — bottom left
+        uiState.connectionError?.let { error ->
+            Text(
+                text = error,
+                color = Gray,
+                fontSize = 12.sp,
+                fontFamily = SpaceGrotesk,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(bottom = 40.dp)
+            )
+        }
+
+        // Search action — bottom right, underlined like the Light Phone START label
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(bottom = 40.dp)
+        ) {
             if (uiState.isLoadingConnections) {
-                // Replace the button with a spinner during a pending request so the user
-                // cannot fire duplicate searches. The spinner inherits the white colour
-                // scheme to stay consistent with the monochrome design.
                 CircularProgressIndicator(
                     color = Color.White,
-                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 1.5.dp
                 )
             } else {
-                // Inverted colours (white container, black label) to make the primary action
-                // visually prominent without introducing any colour accents.
-                Button(
-                    onClick = { viewModel.searchConnections(onNavigateToResults) },
+                Text(
+                    text = "SEARCH",
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    fontFamily = SpaceGrotesk,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 4.sp,
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color.White,
-                        contentColor = Color.Black
-                    ),
-                    // extraSmall corners give a squared-off, utilitarian appearance that fits
-                    // the Light Phone's typographic design language.
-                    shape = MaterialTheme.shapes.extraSmall
-                ) {
-                    Text(
-                        text = "SEARCH",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 3.sp
-                    )
-                }
-            }
-
-            // Error surface — rendered inline below the button so the user sees it without
-            // any modal interruption. Cleared on the next successful search.
-            uiState.connectionError?.let { error ->
-                Spacer(modifier = Modifier.height(20.dp))
-                Text(text = error, color = Color.Gray, fontSize = 14.sp)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { viewModel.searchConnections(onNavigateToResults) }
+                        .drawBottomLine(Color.White, 5.dp)
+                )
             }
         }
     }
 }
 
-/**
- * A labelled text input with a live autocomplete suggestion list rendered directly beneath it.
- *
- * The suggestion list is a plain [Column] rather than a floating [androidx.compose.material3.DropdownMenu].
- * This is intentional: a floating menu would overlap the "To" field on the narrow Light Phone
- * screen, whereas an inline column pushes the content downward and keeps the layout predictable.
- * The maximum of 5 suggestions (capped in [ch.lightsbb.viewmodel.SearchViewModel]) limits
- * how far the layout is displaced.
- *
- * The text field colours override all Material3 defaults to enforce the black/white scheme:
- * - Container: `0xFF000000` (black) in both focused and unfocused states.
- * - Border: white when focused, `0xFF555555` (dark grey) when unfocused.
- * - Text and cursor: white in all states.
- *
- * @param label All-caps field label shown above the text field (e.g. `"FROM"`, `"TO"`).
- * @param query Current text value of the field.
- * @param suggestions Autocomplete [Station] list to display. Empty list hides the dropdown.
- * @param onQueryChange Invoked on every character change, receives the full new value.
- * @param onStationSelected Invoked when the user taps a suggestion row.
- * @param imeAction Keyboard action button shown for this field ([ImeAction.Next] or [ImeAction.Search]).
- * @param onSearch Optional callback for when the keyboard's Search action is triggered.
- *   Only meaningful when [imeAction] is [ImeAction.Search].
- */
+// —— Small helpers ——
+
+private fun Modifier.drawBottomLine(color: Color, offsetY: Dp = 4.dp): Modifier =
+    drawBehind {
+        val y = size.height + offsetY.toPx()
+        drawLine(color, Offset(0f, y), Offset(size.width, y), strokeWidth = 1.dp.toPx())
+    }
+
+@Composable
+private fun InfoRow(label: String, value: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            ),
+        verticalAlignment = Alignment.Bottom
+    ) {
+        Text(
+            text = label,
+            color = Gray,
+            fontSize = 11.sp,
+            fontFamily = SpaceGrotesk,
+            fontWeight = FontWeight.Light,
+            letterSpacing = 2.sp,
+            modifier = Modifier.width(56.dp)
+        )
+        Text(
+            text = value,
+            color = Color.White,
+            fontSize = 22.sp,
+            fontFamily = SpaceGrotesk,
+            fontWeight = FontWeight.Light
+        )
+    }
+    Spacer(modifier = Modifier.height(10.dp))
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(0.5.dp)
+            .background(DimGray)
+    )
+}
+
+@Composable
+private fun DepartureArrivalToggle(isDeparture: Boolean, onToggle: (Boolean) -> Unit) {
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val halfWidth = maxWidth / 2
+        val indicatorOffset by animateDpAsState(
+            targetValue = if (isDeparture) 0.dp else halfWidth,
+            animationSpec = tween(durationMillis = 220),
+            label = "dep_arr"
+        )
+
+        Column {
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "DEPARTURE",
+                    color = if (isDeparture) Color.White else DimGray,
+                    fontSize = 12.sp,
+                    fontFamily = SpaceGrotesk,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 2.sp,
+                    textAlign = TextAlign.Start,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { onToggle(true) }
+                )
+                Text(
+                    text = "ARRIVAL",
+                    color = if (!isDeparture) Color.White else DimGray,
+                    fontSize = 12.sp,
+                    fontFamily = SpaceGrotesk,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 2.sp,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { onToggle(false) }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Track
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(DimGray)
+            ) {
+                // Active indicator slides between left and right half
+                Box(
+                    modifier = Modifier
+                        .offset(x = indicatorOffset)
+                        .width(halfWidth)
+                        .height(1.dp)
+                        .background(Color.White)
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun StationField(
     label: String,
@@ -174,64 +353,92 @@ private fun StationField(
     onQueryChange: (String) -> Unit,
     onStationSelected: (Station) -> Unit,
     imeAction: ImeAction = ImeAction.Default,
-    onSearch: (() -> Unit)? = null
+    onSearch: (() -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null
 ) {
     Column {
-        // Micro-label above the field — small, spaced caps give a clean timetable-board feel.
         Text(
             text = label,
-            color = Color.Gray,
+            color = Gray,
             fontSize = 11.sp,
-            fontWeight = FontWeight.Medium,
+            fontFamily = SpaceGrotesk,
+            fontWeight = FontWeight.Light,
             letterSpacing = 2.sp,
             modifier = Modifier.padding(bottom = 6.dp)
         )
 
-        OutlinedTextField(
-            value = query,
-            onValueChange = onQueryChange,
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            // Font size 20 sp — larger than the Material3 default to create a clear
-            // visual hierarchy and improve readability on a high-DPI small screen.
-            textStyle = TextStyle(fontSize = 20.sp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
-                cursorColor = Color.White,
-                focusedBorderColor = Color.White,
-                unfocusedBorderColor = Color(0xFF555555),
-                focusedContainerColor = Color.Black,
-                unfocusedContainerColor = Color.Black
-            ),
-            keyboardOptions = KeyboardOptions(imeAction = imeAction),
-            keyboardActions = KeyboardActions(
-                onSearch = { onSearch?.invoke() },
-                onNext = { /* focus moves automatically via the IME */ }
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+                textStyle = TextStyle(
+                    color = Color.White,
+                    fontSize = 30.sp,
+                    fontFamily = SpaceGrotesk,
+                    fontWeight = FontWeight.Light
+                ),
+                cursorBrush = SolidColor(Color.White),
+                keyboardOptions = KeyboardOptions(imeAction = imeAction),
+                keyboardActions = KeyboardActions(
+                    onSearch = { onSearch?.invoke() },
+                    onNext = {}
+                ),
+                decorationBox = { innerTextField ->
+                    Box {
+                        if (query.isEmpty()) {
+                            Text(
+                                text = "—",
+                                color = DimGray,
+                                fontSize = 30.sp,
+                                fontFamily = SpaceGrotesk,
+                                fontWeight = FontWeight.Light
+                            )
+                        }
+                        innerTextField()
+                    }
+                }
             )
+            trailing?.invoke()
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(0.5.dp)
+                .background(DimGray)
         )
 
-        // Autocomplete dropdown — only rendered when there are results to show.
+        // Autocomplete suggestions
         if (suggestions.isNotEmpty()) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    // Slightly lighter than pure black so the dropdown is visually distinct
-                    // from the page background without introducing any colour.
-                    .background(Color(0xFF111111))
+                    .background(SurfaceGray)
             ) {
                 suggestions.forEach { station ->
                     Text(
                         text = station.name ?: "",
                         color = Color.White,
-                        fontSize = 16.sp,
+                        fontSize = 18.sp,
+                        fontFamily = SpaceGrotesk,
+                        fontWeight = FontWeight.Light,
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onStationSelected(station) }
-                            // 16 dp vertical padding gives each row a 48+ dp touch target.
-                            .padding(horizontal = 16.dp, vertical = 16.dp)
+                            .padding(vertical = 14.dp)
                     )
-                    HorizontalDivider(color = Color(0xFF2A2A2A))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(0.5.dp)
+                            .background(SubtleGray)
+                    )
                 }
             }
         }
