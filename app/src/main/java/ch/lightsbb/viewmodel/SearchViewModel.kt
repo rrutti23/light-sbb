@@ -6,7 +6,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import ch.lightsbb.api.Connection
 import ch.lightsbb.api.Station
+import ch.lightsbb.api.TransportApi
 import ch.lightsbb.api.TransportApiClient
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -31,7 +33,7 @@ data class SearchUiState(
     val connectionError: String? = null
 )
 
-@OptIn(FlowPreview::class)
+@OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
 class SearchViewModel(
     application: Application,
     private val api: TransportApi = TransportApiClient.api
@@ -73,7 +75,7 @@ class SearchViewModel(
                     try {
                         emit(api.getLocations(query).stations.take(5))
                     } catch (e: Exception) {
-                        emit(emptyList())
+                        emit(emptyList<Station>())
                     }
                 }
             }
