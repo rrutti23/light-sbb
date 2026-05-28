@@ -34,6 +34,25 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lightsbb.api.Station
 import ch.lightsbb.viewmodel.SearchViewModel
 
+/**
+ * Root composable for the search screen — the app's entry point.
+ *
+ * Displays two [StationField]s (From / To) with live autocomplete dropdowns, a search
+ * button, and an optional error message. Both fields are pre-populated from the last
+ * successful search via [SearchViewModel], so the user's most common route is ready on launch.
+ *
+ * ## Design constraints (Light Phone III)
+ * - Pure black background (`0xFF000000`) with white text — no colour accents whatsoever.
+ * - Generous vertical padding (32 dp top, 48 dp below title) to give the sparse layout
+ *   room to breathe on the device's tall narrow display.
+ * - The search button is 56 dp tall — the Material3 recommended minimum touch target.
+ * - While a search is loading, the button is replaced by a [CircularProgressIndicator] so
+ *   the user cannot trigger a second concurrent request.
+ *
+ * @param viewModel Shared ViewModel providing UI state and event callbacks.
+ * @param onNavigateToResults Called after [SearchViewModel.searchConnections] succeeds.
+ *   In [ch.lightsbb.MainActivity] this triggers `navController.navigate("results")`.
+ */
 @Composable
 fun SearchScreen(viewModel: SearchViewModel, onNavigateToResults: () -> Unit) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -45,6 +64,8 @@ fun SearchScreen(viewModel: SearchViewModel, onNavigateToResults: () -> Unit) {
             .padding(horizontal = 24.dp, vertical = 32.dp)
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
+
+            // App title — doubles as a visual anchor at the top of the otherwise minimal screen.
             Text(
                 text = "SBB Light",
                 color = Color.White,
@@ -59,6 +80,7 @@ fun SearchScreen(viewModel: SearchViewModel, onNavigateToResults: () -> Unit) {
                 suggestions = uiState.fromSuggestions,
                 onQueryChange = viewModel::onFromQueryChange,
                 onStationSelected = viewModel::onFromStationSelected,
+                // ImeAction.Next moves focus to the "To" field without submitting the form.
                 imeAction = ImeAction.Next
             )
 
@@ -70,6 +92,8 @@ fun SearchScreen(viewModel: SearchViewModel, onNavigateToResults: () -> Unit) {
                 suggestions = uiState.toSuggestions,
                 onQueryChange = viewModel::onToQueryChange,
                 onStationSelected = viewModel::onToStationSelected,
+                // ImeAction.Search on the second field lets the user trigger a search
+                // directly from the keyboard without reaching for the button.
                 imeAction = ImeAction.Search,
                 onSearch = { viewModel.searchConnections(onNavigateToResults) }
             )
@@ -77,11 +101,16 @@ fun SearchScreen(viewModel: SearchViewModel, onNavigateToResults: () -> Unit) {
             Spacer(modifier = Modifier.height(36.dp))
 
             if (uiState.isLoadingConnections) {
+                // Replace the button with a spinner during a pending request so the user
+                // cannot fire duplicate searches. The spinner inherits the white colour
+                // scheme to stay consistent with the monochrome design.
                 CircularProgressIndicator(
                     color = Color.White,
                     modifier = Modifier.align(Alignment.CenterHorizontally)
                 )
             } else {
+                // Inverted colours (white container, black label) to make the primary action
+                // visually prominent without introducing any colour accents.
                 Button(
                     onClick = { viewModel.searchConnections(onNavigateToResults) },
                     modifier = Modifier
@@ -91,6 +120,8 @@ fun SearchScreen(viewModel: SearchViewModel, onNavigateToResults: () -> Unit) {
                         containerColor = Color.White,
                         contentColor = Color.Black
                     ),
+                    // extraSmall corners give a squared-off, utilitarian appearance that fits
+                    // the Light Phone's typographic design language.
                     shape = MaterialTheme.shapes.extraSmall
                 ) {
                     Text(
@@ -102,6 +133,8 @@ fun SearchScreen(viewModel: SearchViewModel, onNavigateToResults: () -> Unit) {
                 }
             }
 
+            // Error surface — rendered inline below the button so the user sees it without
+            // any modal interruption. Cleared on the next successful search.
             uiState.connectionError?.let { error ->
                 Spacer(modifier = Modifier.height(20.dp))
                 Text(text = error, color = Color.Gray, fontSize = 14.sp)
@@ -110,6 +143,29 @@ fun SearchScreen(viewModel: SearchViewModel, onNavigateToResults: () -> Unit) {
     }
 }
 
+/**
+ * A labelled text input with a live autocomplete suggestion list rendered directly beneath it.
+ *
+ * The suggestion list is a plain [Column] rather than a floating [androidx.compose.material3.DropdownMenu].
+ * This is intentional: a floating menu would overlap the "To" field on the narrow Light Phone
+ * screen, whereas an inline column pushes the content downward and keeps the layout predictable.
+ * The maximum of 5 suggestions (capped in [ch.lightsbb.viewmodel.SearchViewModel]) limits
+ * how far the layout is displaced.
+ *
+ * The text field colours override all Material3 defaults to enforce the black/white scheme:
+ * - Container: `0xFF000000` (black) in both focused and unfocused states.
+ * - Border: white when focused, `0xFF555555` (dark grey) when unfocused.
+ * - Text and cursor: white in all states.
+ *
+ * @param label All-caps field label shown above the text field (e.g. `"FROM"`, `"TO"`).
+ * @param query Current text value of the field.
+ * @param suggestions Autocomplete [Station] list to display. Empty list hides the dropdown.
+ * @param onQueryChange Invoked on every character change, receives the full new value.
+ * @param onStationSelected Invoked when the user taps a suggestion row.
+ * @param imeAction Keyboard action button shown for this field ([ImeAction.Next] or [ImeAction.Search]).
+ * @param onSearch Optional callback for when the keyboard's Search action is triggered.
+ *   Only meaningful when [imeAction] is [ImeAction.Search].
+ */
 @Composable
 private fun StationField(
     label: String,
@@ -121,6 +177,7 @@ private fun StationField(
     onSearch: (() -> Unit)? = null
 ) {
     Column {
+        // Micro-label above the field — small, spaced caps give a clean timetable-board feel.
         Text(
             text = label,
             color = Color.Gray,
@@ -129,11 +186,14 @@ private fun StationField(
             letterSpacing = 2.sp,
             modifier = Modifier.padding(bottom = 6.dp)
         )
+
         OutlinedTextField(
             value = query,
             onValueChange = onQueryChange,
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
+            // Font size 20 sp — larger than the Material3 default to create a clear
+            // visual hierarchy and improve readability on a high-DPI small screen.
             textStyle = TextStyle(fontSize = 20.sp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedTextColor = Color.White,
@@ -147,13 +207,17 @@ private fun StationField(
             keyboardOptions = KeyboardOptions(imeAction = imeAction),
             keyboardActions = KeyboardActions(
                 onSearch = { onSearch?.invoke() },
-                onNext = {}
+                onNext = { /* focus moves automatically via the IME */ }
             )
         )
+
+        // Autocomplete dropdown — only rendered when there are results to show.
         if (suggestions.isNotEmpty()) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    // Slightly lighter than pure black so the dropdown is visually distinct
+                    // from the page background without introducing any colour.
                     .background(Color(0xFF111111))
             ) {
                 suggestions.forEach { station ->
@@ -164,6 +228,7 @@ private fun StationField(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onStationSelected(station) }
+                            // 16 dp vertical padding gives each row a 48+ dp touch target.
                             .padding(horizontal = 16.dp, vertical = 16.dp)
                     )
                     HorizontalDivider(color = Color(0xFF2A2A2A))

@@ -26,11 +26,38 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 
+/**
+ * Unit tests for [SearchViewModel] state management and coroutine behaviour.
+ *
+ * ## Test strategy
+ * [SearchViewModel] is tested directly (not via a [androidx.lifecycle.ViewModelProvider])
+ * by constructing it with mock dependencies injected through its `api` constructor parameter.
+ * This avoids real network calls and makes assertions on [SearchViewModel.uiState] synchronous
+ * and deterministic.
+ *
+ * ## Coroutine control
+ * [SearchViewModel] launches coroutines on [androidx.lifecycle.ViewModel.viewModelScope], which
+ * is bound to [kotlinx.coroutines.Dispatchers.Main]. [MainDispatcherRule] replaces Main with a
+ * [kotlinx.coroutines.test.StandardTestDispatcher] before each test. Each `runTest` call passes
+ * the **same** dispatcher so that both the ViewModel's coroutines and the test's time-control
+ * functions ([advanceTimeBy], [advanceUntilIdle]) share a single scheduler — without this, time
+ * advancement inside `runTest` would not advance the ViewModel's debounce timers.
+ *
+ * ## Mock setup
+ * - [mockApi] is a MockK mock of [TransportApi]; each test stubs only the calls it exercises.
+ * - [mockPrefs] and [mockEditor] simulate [android.content.SharedPreferences] without touching
+ *   the file system. `mockEditor` uses `relaxed = true` so unstubbed write calls are no-ops.
+ * - The `@Before` method stubs [mockApi.getLocations] to return an empty list by default,
+ *   preventing autocomplete network calls from interfering with connection-search tests.
+ */
 @OptIn(ExperimentalCoroutinesApi::class)
 class SearchViewModelTest {
 
-    // Share the same dispatcher between the rule (Dispatchers.Main) and each runTest block
-    // so that viewModelScope coroutines and test time-control are on the same scheduler.
+    /**
+     * Installs a [kotlinx.coroutines.test.StandardTestDispatcher] as [kotlinx.coroutines.Dispatchers.Main]
+     * before each test and restores the original dispatcher afterward.
+     * See [MainDispatcherRule] for why this is necessary.
+     */
     @get:Rule
     val mainDispatcherRule = MainDispatcherRule()
 
@@ -45,16 +72,21 @@ class SearchViewModelTest {
         every { mockPrefs.getString("last_from", "") } returns ""
         every { mockPrefs.getString("last_to", "") } returns ""
         every { mockPrefs.edit() } returns mockEditor
-        // Default: autocomplete never returns real suggestions so it doesn't pollute state tests.
+        // Stub getLocations to return empty by default so autocomplete coroutines don't
+        // throw UnstubbedCallException and don't pollute unrelated state assertions.
         coEvery { mockApi.getLocations(any(), any()) } returns LocationsResponse(emptyList())
     }
 
+    /** Constructs a [SearchViewModel] with the shared mocks. */
     private fun buildVm() = SearchViewModel(mockApplication, mockApi)
 
-    // --- initial state ---
+    // -------------------------------------------------------------------------
+    // Initial state
+    // -------------------------------------------------------------------------
 
     @Test
     fun `loads last saved queries from SharedPreferences on init`() {
+        // Override the default empty stubs to simulate a previously searched route.
         every { mockPrefs.getString("last_from", "") } returns "Zürich HB"
         every { mockPrefs.getString("last_to", "") } returns "Bern"
 
@@ -74,7 +106,9 @@ class SearchViewModelTest {
         assertNull(vm.uiState.value.connectionError)
     }
 
-    // --- query changes ---
+    // -------------------------------------------------------------------------
+    // Query field changes
+    // -------------------------------------------------------------------------
 
     @Test
     fun `onFromQueryChange updates fromQuery in state`() {
@@ -85,6 +119,8 @@ class SearchViewModelTest {
 
     @Test
     fun `onFromQueryChange clears suggestions when query drops below 2 chars`() {
+        // A query shorter than 2 characters is below the autocomplete minimum —
+        // any stale suggestions from a previous longer query must be dismissed.
         val vm = buildVm()
         vm.onFromQueryChange("Z")
         assertTrue(vm.uiState.value.fromSuggestions.isEmpty())
@@ -97,7 +133,9 @@ class SearchViewModelTest {
         assertEquals("Bern", vm.uiState.value.toQuery)
     }
 
-    // --- station selection ---
+    // -------------------------------------------------------------------------
+    // Station selection from autocomplete dropdown
+    // -------------------------------------------------------------------------
 
     @Test
     fun `selecting a from-station sets query to station name and clears suggestions`() {
@@ -119,7 +157,9 @@ class SearchViewModelTest {
         assertTrue(vm.uiState.value.toSuggestions.isEmpty())
     }
 
-    // --- autocomplete ---
+    // -------------------------------------------------------------------------
+    // Autocomplete pipeline (debounce + flatMapLatest)
+    // -------------------------------------------------------------------------
 
     @Test
     fun `autocomplete fetches after 300ms debounce for 2+ char query`() =
@@ -129,7 +169,8 @@ class SearchViewModelTest {
 
             val vm = buildVm()
             vm.onFromQueryChange("Zü")
-            advanceTimeBy(400) // past the 300ms debounce
+            // Advance 400 ms — past the 300 ms debounce window — to allow the API call to fire.
+            advanceTimeBy(400)
 
             assertEquals(results, vm.uiState.value.fromSuggestions)
         }
@@ -137,21 +178,24 @@ class SearchViewModelTest {
     @Test
     fun `rapid typing only triggers one fetch for the final query`() =
         runTest(mainDispatcherRule.testDispatcher) {
+            // flatMapLatest should cancel the previous inner flow the moment a new query arrives,
+            // so only the last stable value (after the debounce) produces a network call.
             coEvery { mockApi.getLocations(any(), any()) } returns LocationsResponse(emptyList())
 
             val vm = buildVm()
-            vm.onFromQueryChange("Z")
-            vm.onFromQueryChange("Zü")
-            vm.onFromQueryChange("Zür")
+            vm.onFromQueryChange("Z")   // below threshold — no fetch
+            vm.onFromQueryChange("Zü")  // 2+ chars — debounce starts
+            vm.onFromQueryChange("Zür") // resets debounce — only this should reach the API
             advanceTimeBy(400)
 
-            // Only the last distinct query (≥ 2 chars) should have been fetched
+            // Exactly one API call for the final stabilised query.
             coVerify(exactly = 1) { mockApi.getLocations(any(), any()) }
         }
 
     @Test
     fun `single character query does not trigger a fetch at all`() =
         runTest(mainDispatcherRule.testDispatcher) {
+            // The filter { it.length >= 2 } operator in the pipeline must prevent this call.
             val vm = buildVm()
             vm.onFromQueryChange("Z")
             advanceUntilIdle()
@@ -159,11 +203,14 @@ class SearchViewModelTest {
             coVerify(exactly = 0) { mockApi.getLocations(any(), any()) }
         }
 
-    // --- connection search ---
+    // -------------------------------------------------------------------------
+    // Connection search
+    // -------------------------------------------------------------------------
 
     @Test
     fun `searchConnections does nothing when from is blank`() =
         runTest(mainDispatcherRule.testDispatcher) {
+            // Guard: should not set isLoadingConnections or call the API.
             val vm = buildVm()
             vm.onToQueryChange("Bern")
             var called = false
@@ -238,6 +285,7 @@ class SearchViewModelTest {
             vm.searchConnections {}
             advanceUntilIdle()
 
+            // The successful pair must be persisted so the next app launch can pre-fill the fields.
             verify { mockEditor.putString("last_from", "Zürich HB") }
             verify { mockEditor.putString("last_to", "Bern") }
             verify { mockEditor.apply() }
@@ -246,15 +294,16 @@ class SearchViewModelTest {
     @Test
     fun `searchConnections clears suggestions before navigating`() =
         runTest(mainDispatcherRule.testDispatcher) {
+            // Simulate a scenario where autocomplete has populated suggestions and the user
+            // then taps Search — the dropdowns must be gone when the results screen appears.
             val stations = listOf(Station("1", "Zürich HB", null))
             coEvery { mockApi.getLocations("Zürich HB", any()) } returns LocationsResponse(stations)
             coEvery { mockApi.getConnections(any(), any(), any()) } returns
                 ConnectionsResponse(emptyList())
 
             val vm = buildVm()
-            // Manually put a suggestion into state, then search
             vm.onFromQueryChange("Zürich HB")
-            advanceTimeBy(400) // trigger autocomplete
+            advanceTimeBy(400) // let the autocomplete pipeline populate fromSuggestions
             vm.onToQueryChange("Bern")
             vm.searchConnections {}
             advanceUntilIdle()
@@ -263,8 +312,14 @@ class SearchViewModelTest {
             assertTrue(vm.uiState.value.toSuggestions.isEmpty())
         }
 
-    // --- helpers ---
+    // -------------------------------------------------------------------------
+    // Test data helpers
+    // -------------------------------------------------------------------------
 
+    /**
+     * Builds a minimal [Connection] object suitable for stubbing [TransportApi.getConnections].
+     * Fields not relevant to the test under way are set to plausible fixed values.
+     */
     private fun fakeConnection(fromName: String, toName: String) = Connection(
         from = Stop(
             station = Station("1", fromName, null),

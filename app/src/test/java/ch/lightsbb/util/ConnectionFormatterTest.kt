@@ -3,9 +3,23 @@ package ch.lightsbb.util
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
+/**
+ * Unit tests for [formatTime] and [formatDuration] in [ConnectionFormatter].
+ *
+ * These functions are pure (no side-effects, no I/O) so each test is a simple
+ * input → expected-output assertion with no setup or mocking required.
+ *
+ * ## What is tested
+ * - Correct extraction of `HH:MM` from well-formed ISO 8601 strings.
+ * - Correct conversion of the API's `DDdHH:MM:SS` duration format to human labels.
+ * - Graceful fallback for malformed input (returns the raw string, does not throw).
+ * - Edge cases: midnight, late night, exactly one hour, zero duration, minute padding.
+ */
 class ConnectionFormatterTest {
 
-    // --- formatTime ---
+    // -------------------------------------------------------------------------
+    // formatTime
+    // -------------------------------------------------------------------------
 
     @Test
     fun `formatTime extracts HH-MM from a standard ISO timestamp`() {
@@ -24,6 +38,7 @@ class ConnectionFormatterTest {
 
     @Test
     fun `formatTime returns input unchanged when string has no T separator`() {
+        // Malformed API response should not crash — degrade gracefully to the raw string.
         assertEquals("not-a-date", formatTime("not-a-date"))
     }
 
@@ -32,7 +47,9 @@ class ConnectionFormatterTest {
         assertEquals("08:00", formatTime("2024-06-01T08:00:00+0200"))
     }
 
-    // --- formatDuration ---
+    // -------------------------------------------------------------------------
+    // formatDuration
+    // -------------------------------------------------------------------------
 
     @Test
     fun `formatDuration shows minutes only when under one hour`() {
@@ -46,6 +63,7 @@ class ConnectionFormatterTest {
 
     @Test
     fun `formatDuration pads single-digit minutes to two digits`() {
+        // "2h 05m" must be padded — "2h 5m" would break visual alignment in the list.
         assertEquals("2h 05m", formatDuration("00d02:05:00"))
     }
 
@@ -56,6 +74,7 @@ class ConnectionFormatterTest {
 
     @Test
     fun `formatDuration returns raw string when input is malformed`() {
+        // Malformed API response should not crash — degrade gracefully to the raw string.
         assertEquals("bad-input", formatDuration("bad-input"))
     }
 
