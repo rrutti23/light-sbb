@@ -32,7 +32,10 @@ data class SearchUiState(
 )
 
 @OptIn(FlowPreview::class)
-class SearchViewModel(application: Application) : AndroidViewModel(application) {
+class SearchViewModel(
+    application: Application,
+    private val api: TransportApi = TransportApiClient.api
+) : AndroidViewModel(application) {
 
     private val prefs = application.getSharedPreferences("sbb_prefs", Context.MODE_PRIVATE)
 
@@ -68,7 +71,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
             .flatMapLatest { query ->
                 flow {
                     try {
-                        emit(TransportApiClient.api.getLocations(query).stations.take(5))
+                        emit(api.getLocations(query).stations.take(5))
                     } catch (e: Exception) {
                         emit(emptyList())
                     }
@@ -124,7 +127,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
                 )
             }
             try {
-                val result = TransportApiClient.api.getConnections(from, to)
+                val result = api.getConnections(from, to)
                 prefs.edit()
                     .putString("last_from", from)
                     .putString("last_to", to)

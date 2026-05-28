@@ -32,6 +32,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lightsbb.api.Connection
 import ch.lightsbb.api.Section
+import ch.lightsbb.util.formatDuration
+import ch.lightsbb.util.formatTime
 import ch.lightsbb.viewmodel.SearchViewModel
 
 @Composable
@@ -204,18 +206,3 @@ private fun LegStop(name: String, time: String, platform: String?) {
     }
 }
 
-// ISO 8601 time strings from the API: "2024-01-15T10:32:00+0100" → "10:32"
-private fun formatTime(iso: String): String = try {
-    iso.substringAfter("T").take(5)
-} catch (_: Exception) {
-    iso
-}
-
-// API duration format: "00d00:57:00" → "57m" or "1h 03m"
-private fun formatDuration(raw: String): String = try {
-    val time = raw.substringAfter("d")
-    val (h, m) = time.split(":").let { it[0].toInt() to it[1].toInt() }
-    if (h > 0) "${h}h ${m.toString().padStart(2, '0')}m" else "${m}m"
-} catch (_: Exception) {
-    raw
-}
